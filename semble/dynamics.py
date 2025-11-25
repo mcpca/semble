@@ -50,6 +50,11 @@ class Dynamics:
         return (self.n, self.m, self.p)
 
 
+class ContinuousStateDynamics(Dynamics):
+    def get_space_axis(self) -> NDArray:
+        raise NotImplementedError
+
+
 class LinearSys(Dynamics):
     def __init__(self, a: ArrayLike, b: ArrayLike):
         a = np.array(a)
@@ -410,14 +415,14 @@ class HodgkinHuxleyFBE(Dynamics):
         return (*dx_in, *dx_out, self.time_scale * dr)
 
 
-class GreenshieldsTraffic(Dynamics):
+class GreenshieldsTraffic(ContinuousStateDynamics):
     def __init__(self, n: int, v0: float, dx=None):
         super().__init__(n, 1)
 
         self.inv_step = self.n if not dx else 1.0 / dx
         self.v0 = v0
 
-    def flux(self, x):
+    def flux(self, x: NDArray | float):
         return self.v0 * x * (1.0 - x)
 
     def _dx(self, x, u):
@@ -430,6 +435,9 @@ class GreenshieldsTraffic(Dynamics):
         dx = self.inv_step * (q_in - q_out)
 
         return dx
+
+    def get_space_axis(self):
+        return np.linspace(0.0, 1.0 / self.inv_step * self.n, self.n)
 
 
 class TwoTank(Dynamics):
