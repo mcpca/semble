@@ -2,6 +2,7 @@ import numpy as np
 from . import initial_state
 
 from numpy.typing import ArrayLike, NDArray
+from typing import Any
 
 Dims = tuple[int, int, int]
 Mask = tuple[int, ...]
@@ -492,5 +493,5 @@ _dynamics_names = {
 }
 
 
-def get_dynamics(name: str, args: dict) -> Dynamics:
+def get_dynamics(name: str, args: dict[str, Any]) -> Dynamics:
     return _dynamics_names[name](**args)

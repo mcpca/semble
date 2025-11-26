@@ -11,36 +11,12 @@ from typing import cast
 
 def main(args):
     with open(args.spec, "r") as f:
-        spec: dict = yaml.load(f, Loader=yaml.FullLoader)
+        spec: semble.TSamplerSpec = yaml.load(f, Loader=yaml.FullLoader)
 
-    dynamics_spec = spec["dynamics"]
-    dynamics = semble.dynamics.get_dynamics(
-        dynamics_spec["name"], dynamics_spec["args"]
-    )
-
-    seq_gen_spec = spec["sequence_generator"]
-    seq_gen = semble.sequence_generators.get_sequence_generator(
-        seq_gen_spec["name"], seq_gen_spec["args"]
-    )
-
-    if "initial_state_generator" in spec:
-        ist_spec = spec["initial_state_generator"]
-        initial_state = semble.initial_state.get_initial_state_generator(
-            ist_spec["name"], ist_spec["args"]
-        )
-    else:
-        initial_state = None
-
-    sampler = semble.TrajectorySampler(
-        dynamics=dynamics,
-        control_delta=spec["control_delta"],
-        control_generator=seq_gen,
-        initial_state_generator=initial_state,
-    )
-
+    sampler = semble.make_trajectory_sampler(spec)
     sampler.reset_rngs()
-
-    n_dims = dynamics.dims()[-1]
+    n_dims = sampler.dims()[-1]
+    dynamics = sampler._dyn
 
     if args.continuous_state:
         dynamics = cast(semble.dynamics.ContinuousStateDynamics, dynamics)

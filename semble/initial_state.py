@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 from numpy.random import Generator
+from typing import Any
 
 
 class InitialStateGenerator:
@@ -122,5 +123,7 @@ _initstategen_names = {
 }
 
 
-def get_initial_state_generator(name: str, args: dict) -> InitialStateGenerator:
+def get_initial_state_generator(
+    name: str, args: dict[str, Any]
+) -> InitialStateGenerator:
     return _initstategen_names[name](**args)

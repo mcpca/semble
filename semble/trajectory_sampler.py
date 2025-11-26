@@ -2,11 +2,11 @@ from scipy.integrate import solve_ivp
 import numpy as np
 from numpy.typing import NDArray
 
-from typing import Literal
+from typing import Literal, TypedDict, NotRequired
 
-from .dynamics import Dynamics, Dims
-from .sequence_generators import SequenceGenerator
-from .initial_state import InitialStateGenerator
+from .dynamics import Dynamics, Dims, get_dynamics
+from .sequence_generators import SequenceGenerator, get_sequence_generator, Args
+from .initial_state import InitialStateGenerator, get_initial_state_generator
 
 
 class TrajectorySampler:
@@ -116,3 +116,48 @@ def lhs(n_samples: int, rng: np.random.Generator) -> NDArray:
         rng.uniform(size=(n_samples,)) / n_samples
     )  # sample a delta for each bin
     return bins_start_val + samples
+
+
+class SpecEntry(TypedDict):
+    name: str
+    args: Args
+
+
+class SequenceGeneratorSpec(TypedDict):
+    name: str
+    args: Args | list[Args]
+
+
+class TSamplerSpec(TypedDict):
+    dynamics: SpecEntry
+    sequence_generator: SequenceGeneratorSpec
+    initial_state_generator: NotRequired[SpecEntry]
+    method: NotRequired[str]
+    control_delta: float
+
+
+def make_trajectory_sampler(args: TSamplerSpec) -> TrajectorySampler:
+    dynamics = get_dynamics(args["dynamics"]["name"], args["dynamics"]["args"])
+
+    sequence_generator = get_sequence_generator(
+        args["sequence_generator"]["name"],
+        args["sequence_generator"]["args"],
+    )
+
+    if "initial_state_generator" in args:
+        init_state_gen = get_initial_state_generator(
+            args["initial_state_generator"]["name"],
+            args["initial_state_generator"]["args"],
+        )
+    else:
+        init_state_gen = None
+
+    sampler = TrajectorySampler(
+        dynamics=dynamics,
+        control_delta=args["control_delta"],
+        control_generator=sequence_generator,
+        method=args.get("method"),
+        initial_state_generator=init_state_gen,
+    )
+
+    return sampler
