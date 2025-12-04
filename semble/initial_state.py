@@ -15,7 +15,8 @@ class InitialStateGenerator:
     def sample(self, rng: Generator) -> NDArray:
         return self._sample_impl(rng)
 
-    def _sample_impl(self, rng: Generator):
+    def _sample_impl(self, rng: Generator) -> NDArray:
+        del rng
         raise NotImplementedError
 
 
@@ -25,7 +26,7 @@ class GaussianInitialState(InitialStateGenerator):
         self.n = n
 
     def _sample_impl(self, rng: Generator):
-        return rng.standard_normal(size=self.n)
+        return rng.standard_normal(size=(self.n,))
 
 
 class UniformInitialState(InitialStateGenerator):
