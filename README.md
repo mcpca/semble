@@ -31,7 +31,7 @@ sequence_generator:
   args:
     period: 1
 control_delta: 0.5
-initial_state:
+initial_state_generator:
   name: GaussianInitialState
   args:
     n: 2
