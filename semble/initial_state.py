@@ -29,12 +29,19 @@ class GaussianInitialState(InitialStateGenerator):
 
 
 class UniformInitialState(InitialStateGenerator):
-    def __init__(self, n):
+    def __init__(
+        self,
+        n,
+        min=0.0,
+        max=1.0,
+    ):
         super().__init__()
         self.n = n
+        self.min = min
+        self.max = max
 
     def _sample_impl(self, rng: Generator):
-        return rng.uniform(size=self.n)
+        return rng.uniform(size=(self.n,), low=self.min, high=self.max)
 
 
 class HHFSInitialState(InitialStateGenerator):
