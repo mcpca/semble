@@ -1,0 +1,17 @@
+dynamics:
+  name: ParameterisedVanDerPol
+  args:
+    parameter_generator:
+      name: Uniform
+      args:
+        low: 0.0
+        high: 2.0
+sequence_generator:
+  name: GaussianSqWave
+  args:
+    period: 1
+control_delta: 0.5
+initial_state_generator:
+  name: GaussianInitialState
+  args:
+    n: 2

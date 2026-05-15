@@ -1,0 +1,13 @@
+dynamics:
+  name: VanDerPol
+  args:
+    damping: 1.0
+sequence_generator:
+  name: GaussianSqWave
+  args:
+    period: 1
+control_delta: 0.5
+initial_state_generator:
+  name: GaussianInitialState
+  args:
+    n: 2

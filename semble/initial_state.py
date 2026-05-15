@@ -115,7 +115,7 @@ class GreenshieldsInitialState(InitialStateGenerator):
         x0 = np.empty((self.n_cells,))
         x0[0 : self.sec_size * self.n_sec] = np.repeat(x0_vals, self.sec_size)
         x0[self.sec_size * self.n_sec : -1] = x0[self.sec_size * self.n_sec - 1]
-
+        
         return x0
 
 

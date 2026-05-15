@@ -4,9 +4,9 @@
 This is a utility package to easily generate synthetic datasets of
 (continuous-time) control system trajectories in a reproducible manner.
 
-The architecture is based on composing a control system of the form
-$\dot{x} = f(x, u)$ with probability distributions for the initial condition
-$x_0 = x(0)$ and the control input $u$.
+The architecture is based on composing a control system of the forms
+$\dot{x} = f(x, u)$ and $\dot{x} = f(x,u;\theta)$ with probability distributions for the initial condition
+$x_0 = x(0)$, control input $u$, and parameter $\theta$.
 Together, these specify a distribution on system trajectories which can be
 sampled from.
 `semble` allows one to specify such a distribution in a simple human-readable
@@ -16,7 +16,7 @@ text format.
 
 An example of how to use the package is provided in
 [scripts/sample_dynamics.py](scripts/sample_dynamics.py).
-A `TrajectorySampler` object may be created using the helper function
+Depending on the desired configuration, a `TrajectorySampler` or `ParameterisedTrajectorySampler` object can be created using the helper function
 `make_trajectory_sampler` which takes a `TSamplerSpec` type dictionary.
 This can be created using any format which may be read into a Python `dict`,
 as long as the fields conform to the definition of `TSamplerSpec`.
@@ -36,9 +36,29 @@ initial_state_generator:
   args:
     n: 2
 ```
+or alternatively, the following yaml file for a varying parameter per sampled trajectory:
+```yaml
+dynamics:
+  name: ParameterisedVanDerPol
+  args:
+    parameter_generator: 
+      name: Uniform
+      args:
+        low: 0.0
+        high: 2.0 
+sequence_generator:
+  name: GaussianSqWave
+  args:
+    period: 1
+control_delta: 0.5
+initial_state_generator:
+  name: GaussianInitialState
+  args:
+    n: 2
+```
 defines a Van der Pol system with control amplitudes sampled from a standard
-normal distribution every 0.5 seconds, and initial state sampled from a standard
-normal distribution.
+normal distribution every 0.5 seconds, initial state sampled from a standard
+normal distribution, and, depending on the configuration, a parameter of 1.0 or uniformly sampled between 0.0 and 2.0.
 If we save its contents as `example_vdp_spec.yaml`, we can sample and plot the
 resulting trajectories by running
 ```sh
@@ -68,3 +88,4 @@ standard normal initial state and RK45 integrator are used by default.
 
 Development targets Python 3.11, numpy 1.26 and scipy 1.15 so as to support
 platforms with older toolchains.
+

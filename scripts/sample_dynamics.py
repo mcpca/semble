@@ -1,4 +1,5 @@
-import argparse, sys
+import argparse
+import sys
 
 import semble
 
@@ -15,7 +16,7 @@ def main(args):
 
     sampler = semble.make_trajectory_sampler(spec)
     sampler.reset_rngs()
-    n_dims = sampler.dims()[-1]
+    n_dims = sampler.dims()[2]
     dynamics = sampler._dyn
 
     if args.continuous_state:
@@ -31,11 +32,18 @@ def main(args):
     plt.ion()
 
     while True:
-        _, t, y, u = sampler.get_example(
-            args.time_horizon,
-            n_samples=int(10 * args.time_horizon),
-            time_sample_method="linspace",
-        )
+        if sampler._dyn._is_parameterised:
+            _, t, y, u, parameter = sampler.get_example(
+                args.time_horizon,
+                n_samples=int(10 * args.time_horizon),
+                time_sample_method="linspace",
+            )
+        else:
+            _, t, y, u = sampler.get_example(
+                args.time_horizon,
+                n_samples=int(10 * args.time_horizon),
+                time_sample_method="linspace",
+            )
 
         if not args.continuous_state:
             for k in range(n_plots - 1):
@@ -52,6 +60,12 @@ def main(args):
         )
         ax[-1].set_ylabel(r"$u$")
         ax[-1].set_xlabel(r"$t$")
+
+        if sampler._dyn._is_parameterised:
+            parameter = sampler._dyn._parameter
+            formatted_parameter = ", ".join([f"{x:.2f}" for x in parameter])
+            ax[0].set_title(r"$\theta = {}$".format(formatted_parameter))
+
         plt.draw()
 
         # Wait for key press

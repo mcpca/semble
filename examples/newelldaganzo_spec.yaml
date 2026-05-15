@@ -1,0 +1,21 @@
+dynamics:
+  name: NewellDaganzoTraffic
+  args:
+    n: &n 200
+    dx: 0.01
+    V: 1.0
+
+sequence_generator:
+  name: UniformSqWave
+  args:
+    period: 2
+    min: 0.
+    max: 0.5
+
+initial_state_generator:
+  name: GreenshieldsInitialState
+  args:
+    n_cells: *n
+    n_sections: 8
+
+control_delta: 0.2

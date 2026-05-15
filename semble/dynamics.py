@@ -1,10 +1,9 @@
 import numpy as np
-from . import initial_state
-
+from . import initial_state, parameter_generators
 from numpy.typing import ArrayLike, NDArray
 from typing import Any
 
-Dims = tuple[int, int, int]
+Dims = tuple[int, int, int, int]
 Mask = tuple[int, ...]
 
 
@@ -13,20 +12,23 @@ class Dynamics:
     m: int
     p: int
     mask: Mask
+    is_parameterised: bool
 
     def __init__(
         self,
         state_dim: int,
         control_dim: int,
         mask: Mask | None = None,
+        is_parameterised: bool = False,
     ):
         self.n = state_dim
         self.m = control_dim
-
         self.mask = mask if mask is not None else self.n * (1,)
         self.p = sum(self.mask)
 
         self._method = "RK45"
+
+        self._is_parameterised = is_parameterised
 
     def __call__(self, x: NDArray, u: NDArray) -> ArrayLike:
         return self._dx(x, u)
@@ -48,7 +50,34 @@ class Dynamics:
         return self._method
 
     def dims(self) -> Dims:
-        return (self.n, self.m, self.p)
+        return (self.n, self.m, self.p, 0)
+
+
+class ParameterisedDynamics(Dynamics):
+    """Adds randomization of the parameter (θ) of the dynamics."""
+
+    def __init__(
+        self,
+        parameter_generator,
+        state_dim,
+        control_dim,
+        mask: Mask | None = None,
+    ):
+        super().__init__(
+            state_dim, control_dim, mask, True
+        )  # pass arguments to Dynamics, is_parameterised = True
+
+        self._parameter_generator = parameter_generators.get_parameter_generator(
+            parameter_generator["name"], parameter_generator["args"]
+        )
+
+    # set and return parameter
+    def gen_parameter(self, rng, parameter: NDArray | None = None) -> NDArray:
+        self._set_parameter(rng, parameter)
+        return self._get_parameter()
+
+    def dims(self) -> Dims:
+        return (self.n, self.m, self.p, self._parameter_generator.dim)
 
 
 class ContinuousStateDynamics(Dynamics):
@@ -80,9 +109,29 @@ class VanDerPol(Dynamics):
         p, v = x
 
         dp = v
-        dv = -p + self.damping * (1 - p**2) * v + u.item()
+        dv = -p + self.damping * (1 - p**2) * v + u[0]
 
         return (dp, dv)
+
+
+class ParameterisedVanDerPol(ParameterisedDynamics):
+    def __init__(self, parameter_generator: dict = None):
+        super().__init__(parameter_generator, 2, 1)
+
+        self.dynamics = VanDerPol(None)  # Use VanDerPol Dynamics
+
+    def _set_parameter(self, rng, parameter):
+        if parameter is None:
+            self._parameter = self._parameter_generator.sample(rng)
+        else:
+            self._parameter = parameter
+        self.dynamics.damping = self._parameter[0]
+
+    def _get_parameter(self):
+        return self._parameter
+
+    def _dx(self, x, u):
+        return self.dynamics._dx(x, u)  # reuse differential equation of VanDerPol here
 
 
 class FitzHughNagumo(Dynamics):
@@ -97,10 +146,38 @@ class FitzHughNagumo(Dynamics):
     def _dx(self, x, u):
         v, w = x
 
-        dv = 50 * (v - v**3 - w + u.item())
+        dv = 50 * (v - v**3 - w + u[0])
         dw = (v - self.a - self.b * w) / self.tau
 
         return (dv, dw)
+
+
+class ParameterisedFitzHughNagumo(ParameterisedDynamics):
+    def __init__(
+        self,
+        parameter_generator: dict = None,
+    ):
+        super().__init__(parameter_generator, 2, 1)
+        self._method = "BDF"
+
+        self.dynamics = FitzHughNagumo(None, None, None)
+        self._method = self.dynamics._method
+
+    def _set_parameter(self, rng, parameter):
+        if parameter is None:
+            self._parameter = self._parameter_generator.sample(rng)
+        else:
+            self._parameter = parameter
+
+        self.dynamics.tau = self._parameter[0]
+        self.dynamics.a = self._parameter[1]
+        self.dynamics.b = self._parameter[2]
+
+    def _get_parameter(self):
+        return self._parameter
+
+    def _dx(self, x, u):
+        return self.dynamics._dx(x, u)
 
 
 class Pendulum(Dynamics):
@@ -157,23 +234,13 @@ class HodgkinHuxleyFS(Dynamics):
         ) / (100.0 * self.c_m)
 
         a_n = (
-            -0.032
-            * (v - self.v_t - 15.0)
-            / (np.exp(-(v - self.v_t - 15.0) / 5.0) - 1)
+            -0.032 * (v - self.v_t - 15.0) / (np.exp(-(v - self.v_t - 15.0) / 5.0) - 1)
         )
         b_n = 0.5 * np.exp(-(v - self.v_t - 10.0) / 40.0)
         dn = a_n * (1.0 - n) - b_n * n
 
-        a_m = (
-            -0.32
-            * (v - self.v_t - 13.0)
-            / (np.exp(-(v - self.v_t - 13.0) / 4.0) - 1)
-        )
-        b_m = (
-            0.28
-            * (v - self.v_t - 40.0)
-            / (np.exp((v - self.v_t - 40.0) / 5.0) - 1)
-        )
+        a_m = -0.32 * (v - self.v_t - 13.0) / (np.exp(-(v - self.v_t - 13.0) / 4.0) - 1)
+        b_m = 0.28 * (v - self.v_t - 40.0) / (np.exp((v - self.v_t - 40.0) / 5.0) - 1)
         dm = a_m * (1.0 - m) - b_m * m
 
         a_h = 0.128 * np.exp(-(v - self.v_t - 17.0) / 18.0)
@@ -230,23 +297,13 @@ class HodgkinHuxleyRSA(Dynamics):
         dp = (1.0 / (1 + np.exp(-(v + 35) / 10.0)) - p) / t_p
 
         a_n = (
-            -0.032
-            * (v - self.v_t - 15.0)
-            / (np.exp(-(v - self.v_t - 15.0) / 5.0) - 1)
+            -0.032 * (v - self.v_t - 15.0) / (np.exp(-(v - self.v_t - 15.0) / 5.0) - 1)
         )
         b_n = 0.5 * np.exp(-(v - self.v_t - 10.0) / 40.0)
         dn = a_n * (1.0 - n) - b_n * n
 
-        a_m = (
-            -0.32
-            * (v - self.v_t - 13.0)
-            / (np.exp(-(v - self.v_t - 13.0) / 4.0) - 1)
-        )
-        b_m = (
-            0.28
-            * (v - self.v_t - 40.0)
-            / (np.exp((v - self.v_t - 40.0) / 5.0) - 1)
-        )
+        a_m = -0.32 * (v - self.v_t - 13.0) / (np.exp(-(v - self.v_t - 13.0) / 4.0) - 1)
+        b_m = 0.28 * (v - self.v_t - 40.0) / (np.exp((v - self.v_t - 40.0) / 5.0) - 1)
         dm = a_m * (1.0 - m) - b_m * m
 
         a_h = 0.128 * np.exp(-(v - self.v_t - 17.0) / 18.0)
@@ -314,32 +371,20 @@ class HodgkinHuxleyIB(Dynamics):
         ds = a_s * (1.0 - s) - b_s * s
 
         a_n = (
-            -0.032
-            * (v - self.v_t - 15.0)
-            / (np.exp(-(v - self.v_t - 15.0) / 5.0) - 1)
+            -0.032 * (v - self.v_t - 15.0) / (np.exp(-(v - self.v_t - 15.0) / 5.0) - 1)
         )
         b_n = 0.5 * np.exp(-(v - self.v_t - 10.0) / 40.0)
         dn = a_n * (1.0 - n) - b_n * n
 
-        a_m = (
-            -0.32
-            * (v - self.v_t - 13.0)
-            / (np.exp(-(v - self.v_t - 13.0) / 4.0) - 1)
-        )
-        b_m = (
-            0.28
-            * (v - self.v_t - 40.0)
-            / (np.exp((v - self.v_t - 40.0) / 5.0) - 1)
-        )
+        a_m = -0.32 * (v - self.v_t - 13.0) / (np.exp(-(v - self.v_t - 13.0) / 4.0) - 1)
+        b_m = 0.28 * (v - self.v_t - 40.0) / (np.exp((v - self.v_t - 40.0) / 5.0) - 1)
         dm = a_m * (1.0 - m) - b_m * m
 
         a_h = 0.128 * np.exp(-(v - self.v_t - 17.0) / 18.0)
         b_h = 4.0 / (1.0 + np.exp(-(v - self.v_t - 40.0) / 5.0))
         dh = a_h * (1.0 - h) - b_h * h
 
-        return tuple(
-            self.time_scale * dx for dx in (dv, dp, dq, ds, dn, dm, dh)
-        )
+        return tuple(self.time_scale * dx for dx in (dv, dp, dq, ds, dn, dm, dh))
 
 
 class HodgkinHuxleyFFE(Dynamics):
@@ -428,17 +473,185 @@ class GreenshieldsTraffic(ContinuousStateDynamics):
 
     def _dx(self, x, u):
         q_out = self.flux(x)
+
         q0_in = self.flux(u.item())
 
         q_in = np.roll(q_out, 1)
         q_in[0] = q0_in
 
         dx = self.inv_step * (q_in - q_out)
-
         return dx
 
     def get_space_axis(self):
         return np.linspace(0.0, 1.0 / self.inv_step * self.n, self.n)
+
+
+class NewellDaganzoTraffic(ContinuousStateDynamics):
+    def __init__(self, n: int, V: float, dx=None):
+        """Implementation of basic Cell Transmission Model (CTM) with Newell-Daganzo flux function.
+        https://people.kth.se/~kallej/grad_students/cicic_phdthesis21.pdf"""
+        super().__init__(n, 1)
+
+        self.inv_step = self.n if not dx else 1.0 / dx
+        self.V = V
+        self.sigma = 0.25
+        self.P = 1.0
+        self.W = self.V * (self.sigma / (self.P - self.sigma))
+        self.q_max = self.V * self.sigma
+        self.boundary_right = 0
+        self._parameters = np.array([self.V, self.W, self.P, self.sigma])
+
+    def flux_i(self, x: NDArray):
+        x_plus_one = np.roll(x, -1)
+        x_plus_one[-1] = self.boundary_right  # rho_{N+1}
+        D = self.demand(x)
+        S = self.supply(x_plus_one)
+        q = np.minimum(D, S)  # (3.17)
+        return q
+
+    def flux_i_minus_one(self, x: NDArray, u: float):
+        x_minus_one = np.roll(x, 1)
+        x_minus_one[0] = u  # rho_{0}
+        D = self.demand(x_minus_one)
+        S = self.supply(x)
+        q = np.minimum(D, S)  # (3.17)
+        return q
+
+    def demand(self, x: NDArray):  # (3.18)
+        D = np.minimum(self.V * x, self.q_max)
+        return D
+
+    def supply(self, x: NDArray):  # (3.19)
+        S = np.minimum(self.W * (self.P - x), self.q_max)
+        return S
+
+    def _dx(self, x, u):
+        q_i = self.flux_i(x)  # q_{i}
+        q_i_minus_one = self.flux_i_minus_one(x, u.item())  # q_{i-1}
+
+        dx = self.inv_step * (q_i_minus_one - q_i)  # (3.16)
+        return dx
+
+    def get_space_axis(self):
+        return np.linspace(0.0, 1.0 / self.inv_step * self.n, self.n)
+
+
+class ParameterisedNewellDaganzoTraffic(ParameterisedDynamics):
+    def __init__(self, n: int, dx=None, parameter_generator: dict = None):
+        super().__init__(parameter_generator, n, 1)
+
+        self.dynamics = NewellDaganzoTraffic(n, 0, dx)
+        self.dynamics._method = "BDF"
+
+    def _set_parameter(self, rng, parameter):
+        if parameter is None:
+            self._parameter = self._parameter_generator.sample(rng)
+        else:
+            self._parameter = parameter
+
+        self.dynamics.V = self._parameter[0]
+        self.dynamics.W = self.dynamics.V * (
+            self.dynamics.sigma / (self.dynamics.P - self.dynamics.sigma)
+        )
+        self.dynamics.q_max = self.dynamics.V * self.dynamics.sigma
+        self.dynamics._parameters = np.array(
+            [self.dynamics.V, self.dynamics.W, self.dynamics.P, self.dynamics.sigma]
+        )
+
+    def _get_parameter(self):
+        return self._parameter
+
+    def _dx(self, x, u):
+        return self.dynamics._dx(x, u)
+
+    def get_space_axis(self):
+        return self.dynamics.get_space_axis()
+
+
+class CellTransmissionModel(ContinuousStateDynamics):
+    def __init__(
+        self, n: int, locations: NDArray = None, values: NDArray = None, dx=None
+    ):
+        """Implementation of basic Cell Transmission Model (CTM) with general flux functions.
+        https://people.kth.se/~kallej/grad_students/cicic_phdthesis21.pdf"""
+        super().__init__(n, 1)
+        self.inv_step = self.n if not dx else 1.0 / dx
+        self.P = 1
+        if locations:
+            self.locs = np.zeros(len(locations) + 2)
+            self.vals = np.zeros(len(values) + 2)
+            self.vals[1:-1] = np.array(values)
+            self.locs[1:-1] = np.array(locations)
+            self.locs[-1] = self.P
+            idx = np.argsort(self.locs)
+            self.locs = self.locs[idx]
+            self.vals = self.vals[idx]
+            self.sigma_i = self.locs[np.argmax(self.vals)]
+
+    def flux(self, x: NDArray):
+        return np.interp(x, self.locs, self.vals)
+
+    def _dx(self, x, u):
+        x_minus_one = np.roll(x, 1)
+        x_minus_one[0] = u[0]  # rho_{0}
+        x_plus_one = np.roll(x, -1)
+        x_plus_one[-1] = 0  # rho_{N+1}
+
+        D_i_minus_one = self.flux(np.minimum(x_minus_one, self.sigma_i))
+        S_i = self.flux(np.maximum(x, self.sigma_i))
+        q_i_minus_one = np.minimum(D_i_minus_one, S_i)
+
+        D_i = self.flux(np.minimum(x, self.sigma_i))
+        S_i_plus_one = self.flux(np.maximum(x_plus_one, self.sigma_i))
+        q_i = np.minimum(D_i, S_i_plus_one)
+
+        dx = self.inv_step * (q_i_minus_one - q_i)
+        return dx
+
+    def get_space_axis(self):
+        return np.linspace(0.0, 1.0 / self.inv_step * self.n, self.n)
+
+
+class ParameterisedCellTransmissionModel(ParameterisedDynamics):
+    def __init__(self, n: int, dx=None, parameter_generator: dict = None):
+        """Implementation of basic Cell Transmission Model (CTM) with general flux functions.
+        https://people.kth.se/~kallej/grad_students/cicic_phdthesis21.pdf
+
+        Parameters are return according to theta=(sigma_1,q_1,...sigma_k, q_k), where sigma are locations and q corresponding values. theta is sorted such that sigma_1 < sigma_2 < sigma_k"""
+        super().__init__(parameter_generator, n, 1)
+        self.dynamics = CellTransmissionModel(n, None, None, dx)
+
+    def _set_parameter(self, rng, parameter):
+        if parameter is None:
+            self._parameter = self._parameter_generator.sample(rng)
+        else:
+            self._parameter = parameter
+
+        locations = self._parameter[::2]
+        values = self._parameter[1::2]
+        idx = np.argsort(locations)
+        locations = locations[idx]
+        values = values[idx]
+        self._parameter = np.empty(2 * len(locations))
+        self._parameter[::2] = locations
+        self._parameter[1::2] = values
+
+        self.dynamics.locs = np.zeros(len(locations) + 2)
+        self.dynamics.vals = np.zeros(len(values) + 2)
+        self.dynamics.vals[1:-1] = values
+        self.dynamics.locs[1:-1] = locations
+        self.dynamics.locs[-1] = self.dynamics.P
+
+        self.dynamics.sigma_i = self.dynamics.locs[np.argmax(self.dynamics.vals)]
+
+    def _get_parameter(self):
+        return self._parameter
+
+    def _dx(self, x, u):
+        return self.dynamics._dx(x, u)
+
+    def get_space_axis(self):
+        return self.dynamics.get_space_axis()
 
 
 class TwoTank(Dynamics):
@@ -489,7 +702,13 @@ _dynamics_names = {
     "HodgkinHuxleyFFE": HodgkinHuxleyFFE,
     "HodgkinHuxleyFBE": HodgkinHuxleyFBE,
     "GreenshieldsTraffic": GreenshieldsTraffic,
+    "NewellDaganzoTraffic": NewellDaganzoTraffic,
+    "CellTransmissionModel": CellTransmissionModel,
     "TwoTank": TwoTank,
+    "ParameterisedVanDerPol": ParameterisedVanDerPol,
+    "ParameterisedFitzHughNagumo": ParameterisedFitzHughNagumo,
+    "ParameterisedCellTransmissionModel": ParameterisedCellTransmissionModel,
+    "ParameterisedNewellDaganzoTraffic": ParameterisedNewellDaganzoTraffic,
 }
 
 
